@@ -1,0 +1,163 @@
+---
+title: "Meitong Chen"
+date: "2/28/2024"
+output: html_document
+---
+
+```{r}
+library(readxl)
+library(dplyr)
+library(Hmisc)
+library(MASS)
+```
+
+### Part I.
+
+```{r}
+Heineken = read_excel("Heineken.xlsx")
+head(Heineken, 5)
+```
+
+```{r}
+Heineken2 = Heineken
+Heineken2 = Heineken2 %>%
+  dplyr::select(Awareness_Pct, 
+         Volume_Sales_1000Liter, 
+         ADV_OOH_Euros, 
+         ADV_SocialMedia_Euros,
+         temp_mean, 
+         covid_stringency_index) %>%
+  mutate(lag_sales = Lag(Volume_Sales_1000Liter),
+         lag_awareness = Lag(Awareness_Pct)) %>%
+  rename(awareness = Awareness_Pct,
+         sales = Volume_Sales_1000Liter,
+         OOH = ADV_OOH_Euros,
+         social_media = ADV_SocialMedia_Euros,
+         temp = temp_mean,
+         covid = covid_stringency_index)
+```
+
+```{r}
+head(Heineken2, 5)
+```
+
+```{r}
+m1 = lm(awareness ~ -1 + lag_awareness + OOH, data = Heineken2)
+summary(m1)
+```
+
+`lag awareness` matters.
+
+```{r}
+m2 = lm(awareness ~ -1 + lag_awareness + social_media, data = Heineken2)
+summary(m2)
+```
+
+```{r}
+m3 = lm(sales ~ -1 + lag_sales + awareness + OOH + social_media + temp + covid, data = Heineken2)
+summary(m3)
+```
+
+`awareness`, `social_media`, `temp`, and `covid` matters.
+
+```{r}
+a1 = m1$coeff[2] / (1 - m1$coeff[1])
+a2 = m2$coeff[2] / (1 - m2$coeff[1])
+
+b = m3$coeff[2] / (1 - m3$coeff[1])
+
+c1 = m3$coeff[3] / (1 - m3$coeff[1])
+c2 = m3$coeff[4] / (1 - m3$coeff[1])
+```
+
+```{r}
+# mediation effect
+med_effect_OOH = a1*b
+med_effect_sm = a2*b
+# total effect
+tot_OOH = c1+a1*b
+tot_sm = c2+a2*b
+tot = tot_OOH+tot_sm
+```
+
+```{r}
+out.emp.res = matrix(c(a1, a2, b, c1, c2, med_effect_OOH, med_effect_sm, tot_OOH, tot_sm, tot),10,1)
+colnames(out.emp.res) = c("Estimates")
+rownames(out.emp.res) = c("OOH -> Aware", "Social -> Aware","Aware -> Sales","OOH -> Sales" ,"Social -> Sales","OOH -> Aware -> Sales","Social -> Aware -> Sales", "Total effect for OOH", "Total effect for Social", "Total Effect")
+print(round(out.emp.res, digits = 4))
+```
+
+### Part II. Monte Carlo
+
+Prepare vectors:
+
+```{r}
+m1.param = matrix(cbind(m1$coeff[1], m1$coeff[2]), nrow = 2, ncol = 1)
+m1.vcov = vcov(m1)
+```
+
+```{r}
+m2.param = matrix(cbind(m2$coeff[1], m2$coeff[2]), nrow = 2, ncol = 1)
+m2.vcov = vcov(m2)
+```
+
+```{r}
+m3.param = matrix(cbind(m3$coeff[1], m3$coeff[2], m3$coeff[3], m3$coeff[4], m3$coeff[5], m3$coeff[6]), nrow = 6, ncol = 1)
+m3.vcov = vcov(m3)
+```
+
+Draws for monte carlo:
+
+```{r}
+n.MC = 1000
+draws.m1 = mvrnorm(n.MC, m1.param, m1.vcov)
+draws.m2 = mvrnorm(n.MC, m2.param, m2.vcov)
+draws.m3 = mvrnorm(n.MC, m3.param, m3.vcov)
+```
+
+```{r}
+# a-path
+a1.sim = draws.m1[,2] / (1 - draws.m1[,1])
+a2.sim = draws.m2[,2] / (1 - draws.m2[,1])
+
+# b-path
+b.sim = draws.m3[,2] / (1 - draws.m3[,1])
+
+# c-path
+c1.sim = draws.m3[,3] / (1 - draws.m3[,1])
+c2.sim = draws.m3[,4] / (1 - draws.m3[,1])
+```
+
+```{r}
+# mediation effect
+med_effect_OOH.sim = a1.sim*b.sim
+med_effect_sm.sim = a2.sim*b.sim
+
+# total effect
+tot_OOH.sim = c1.sim+a1.sim*b.sim
+tot_sm.sim = c2.sim+a2.sim*b.sim
+tot.sim = c1.sim+a1.sim*b.sim+c2.sim+a2.sim*b.sim
+```
+
+```{r}
+# results
+a1.res = quantile(a1.sim, probs = c(0.5, 0.025, 0.975))
+a2.res = quantile(a2.sim, probs = c(0.5, 0.025, 0.975))
+b.res = quantile(b.sim, probs = c(0.5, 0.025, 0.975))
+c1.res = quantile(c1.sim, probs = c(0.5, 0.025, 0.975))
+c2.res = quantile(c2.sim, probs = c(0.5, 0.025, 0.975))
+med_OOH.res = quantile(med_effect_OOH.sim, probs = c(0.5, 0.025, 0.975))
+med_sm.res = quantile(med_effect_sm.sim, probs = c(0.5, 0.025, 0.975))
+tot_OOH.res = quantile(tot_OOH.sim, probs = c(0.5, 0.025, 0.975))
+tot_sm.res = quantile(tot_sm.sim, probs = c(0.5, 0.025, 0.975))
+tot.res = quantile(tot.sim, probs = c(0.5, 0.025, 0.975))
+
+out.mediation.res = matrix(0,10,3)
+out.mediation.res = rbind(a1.res, a2.res, b.res, c1.res, c2.res, med_OOH.res, med_sm.res, tot_OOH.res, tot_sm.res, tot.res)
+colnames(out.mediation.res) = c("Median", "2.5% CIs", "97.5% CIs")
+rownames(out.mediation.res) = c("OOH -> Aware", "Social -> Aware","Aware -> Sales","OOH -> Sales" ,"Social -> Sales","OOH -> Aware -> Sales","Social -> Aware -> Sales", "Total effect for OOH", "Total effect for Social", "Total Effect")
+
+print(round(out.mediation.res, digits = 4))
+```
+
+
